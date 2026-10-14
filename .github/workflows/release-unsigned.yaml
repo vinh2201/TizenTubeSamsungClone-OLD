@@ -51,6 +51,17 @@ jobs:
       - name: Package widget (Fork Native)
         run: npm run package
 
+      - name: Audit the widget
+        run: npm run audit -- --release
+
+      - name: Name the widgets after the version
+        id: widget
+        run: |
+          version="$(node -p "require('./tizen.config.json').version")"
+          mv release/tube-tizen-5.5.wgt "release/tizen-youtube-${version}-tizen-5.5.wgt"
+          mv release/tube-tizen-5.0.wgt "release/tizen-youtube-${version}-tizen-5.0.wgt"
+          echo "path=release/tizen-youtube-${version}*.wgt" >> "$GITHUB_OUTPUT"
+
       - name: Upload Signed WGT Artifacts
         uses: actions/upload-artifact@v4
         with:

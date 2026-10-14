@@ -1,0 +1,59 @@
+name: Release and Build TizenTube - Original
+
+on:
+  workflow_dispatch:
+  push:
+    branches: 
+      - main
+
+env:
+  TIZEN_STUDIO_VER: 5.6
+
+jobs:
+  build:
+    name: Build and Sign TizenTube WGT - Original
+    runs-on: ubuntu-24.04
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download and Install Tizen Studio CLI
+        run: |
+          set -euo pipefail
+          curl -fL -o tizen-installer "https://download.tizen.org/sdk/Installer/tizen-studio_${TIZEN_STUDIO_VER}/web-cli_Tizen_Studio_${TIZEN_STUDIO_VER}_ubuntu-64.bin"
+          chmod +x tizen-installer
+          ./tizen-installer --accept-license "${GITHUB_WORKSPACE}/tizen-studio"
+          rm ./tizen-installer
+          echo "${GITHUB_WORKSPACE}/tizen-studio/tools/ide/bin" >> $GITHUB_PATH
+          export PATH="${GITHUB_WORKSPACE}/tizen-studio/tools/ide/bin:$PATH"
+
+      - name: Build project
+        run: npm run build
+
+      - name: Package widget (Fork Native)
+        run: npm run package
+
+      - name: Upload Signed WGT Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TizenTubeSamsungClone-ORIGINAL
+          path: release-final/*
+          if-no-files-found: error

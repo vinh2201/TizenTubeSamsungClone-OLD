@@ -1,4 +1,4 @@
-name: Release and Build TizenTube - Original
+name: (unsign) Release and Build TizenTube - Original
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ env:
 
 jobs:
   build:
-    name: Build and Sign TizenTube WGT - Original
+    name: (unsign) Build and Sign TizenTube WGT - Original
     runs-on: ubuntu-24.04
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true

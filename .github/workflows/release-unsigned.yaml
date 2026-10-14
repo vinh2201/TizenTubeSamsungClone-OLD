@@ -55,5 +55,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TizenTubeSamsungClone-ORIGINAL
-          path: release-final/*
+          path: release/*
           if-no-files-found: error

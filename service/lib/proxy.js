@@ -5,6 +5,7 @@ const express = require('express');
 const { USER_SCRIPT, read } = require('./shipped.js');
 const dev = require('../dev/index.js');
 const postmortem = require('./postmortem.js');
+const clients = require('./clients.js');
 const protection = require('./protection.js');
 const containerAgent = require('./containerAgent.js');
 const { upstream } = require('./knobs.js');
@@ -142,7 +143,19 @@ const attachFallback = (app) => {
             return res.status(502).end();
         }
 
+        // Forwarding is for the container on this set, never for another device on the network.
+        if (!clients.fromThisTv(req)) {
+            clients.refused('forwarding', clients.plain(req.socket && req.socket.remoteAddress), req.method);
+            return res.status(403).type('text/plain').send('tube: only this TV may use this');
+        }
+
         const route = routeFor(req);
+
+        // The page sends only Google's hosts through the bypass; anywhere else is not ours to fetch.
+        if (route.isBypass && !clients.bypassAllows(route.host)) {
+            clients.refused('bypass', clients.plain(req.socket && req.socket.remoteAddress), route.host);
+            return res.status(403).type('text/plain').send('tube: not a host the page sends through here');
+        }
 
         // Served as ourselves, the page has to say so in its own URL before kabuki reads it.
         if (req.path === '/tv' && !hidesWatermark(req.url)) {

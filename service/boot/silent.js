@@ -6,6 +6,7 @@ import { say } from './screen.js';
 import { failureOf } from './failure.js';
 import { lookElsewhere } from './elsewhere.js';
 import { sayHelp } from './help.js';
+import { rereadIfStuck } from './reread.js';
 
 const HOST = service.replace('http://', '');
 
@@ -56,6 +57,9 @@ export const silent = (again, status, how) => {
         say('service', GIVE_UP, 'bad');
         sayHelp();
     }
+
+    rereadIfStuck();
+    if (held.rereading) return;
 
     setTimeout(again, TIMING.every);
 };

@@ -4,15 +4,48 @@ const postmortem = require('./postmortem.js');
 const { CONTAINER, appId, configuredContent, container } = require('./cobaltConfig.js');
 const { STOCK, discover, locate, stageOrFail } = require('./cobaltContent.js');
 const { writeBootScreen } = require('./bootScreen.js');
+const { serviceAddress } = require('./serviceAddress.js');
 const evergreen = require('./evergreen.js');
 const { guarded, restart } = require('./cobaltLaunch.js');
 
 const LOOKUP_QUIET = 5000;
 
+// How often the set's address is looked at, so a boot screen naming an old one is written again. The page
+// reads itself again while nothing answers (service/boot/silent.js), and picks the new one up.
+const ADDRESS_EVERY = Number(process.env.TUBE_ADDRESS_EVERY_MS) || 10000;
+
 const note = (what, detail) => postmortem.note('cobalt', `${what}: ${postmortem.describe(detail)}`);
 
 const state = { prepared: null, preparing: false, settled: false, failed: null, waiting: [] };
 const proxied = { context: null, at: 0, lookedAt: 0 };
+
+// The address the boot screen on disk was last written for.
+const screen = { address: null, watching: null };
+
+const writeScreen = (content) => guarded(() => {
+    const address = serviceAddress();
+    writeBootScreen(content);
+    screen.address = address;
+}, (error) => note('boot screen', error));
+
+// Started at boot before the network was up, the screen names loopback, which the container cannot
+// reach; a new lease names an address that is gone. Either way the page would wait for ever.
+const readdress = () => {
+    const content = screen.address === null ? null : configuredContent();
+    if (!content) return;
+
+    const now = serviceAddress();
+    if (now === screen.address) return;
+
+    note('address', `${screen.address} → ${now}: the boot screen is written for the new address`);
+    writeScreen(content);
+};
+
+const watchAddress = () => {
+    if (screen.watching) return;
+    screen.watching = setInterval(readdress, ADDRESS_EVERY);
+    if (screen.watching.unref) screen.watching.unref();
+};
 
 const served = () => {
     const now = Date.now();
@@ -38,7 +71,7 @@ const refreshBootScreen = () => {
     const content = configuredContent();
     if (!content) return;
 
-    guarded(() => writeBootScreen(content), (error) => note('boot screen', error));
+    writeScreen(content);
 };
 
 // Only the platform wakes us (boot, standby, reclaim, install); an icon press never does.
@@ -127,7 +160,8 @@ const prepare = (done) => {
     const staged = stageOrFail(content, from);
     if (staged.error) return finish(staged.error);
 
-    guarded(() => writeBootScreen(content), (error) => note('boot screen', error));
+    writeScreen(content);
+    watchAddress();
     guarded(() => evergreen.bootstrap(content, from), (error) => note('evergreen', error));
 
     return finish(null, { content });
@@ -140,5 +174,6 @@ const status = () => ({
 
 module.exports = {
     prepare, wake, served, status, restart, relaunch, container, appId, contact,
+    contact, readdress, refreshBootScreen,
     heardOffer: evergreen.heardOffer
 };

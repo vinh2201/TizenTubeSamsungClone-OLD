@@ -35,6 +35,7 @@ const run = (script, replies, turns, options) => {
     const elsewhereStatus = options && options.elsewhere !== undefined ? options.elsewhere : 0;
     const hangs = !!(options && options.hang);
     const updater = options && options.updater;
+    const storage = options && options.storage;
     const answered = { count: 0 };
     const node = () => ({ className: '', textContent: '', kids: [], appendChild(kid) { this.kids.push(kid); } });
     const log = {
@@ -86,7 +87,13 @@ const run = (script, replies, turns, options) => {
             innerHeight: 1080,
             devicePixelRatio: 1,
             h5vcc: updater ? { updater } : undefined,
-            location: { search: '?launch=menu&cert_scope=samsung', hash: '', replace: (to) => replaced.push(to) }
+            location: { href: 'file:///tube/boot.html?launch=menu&cert_scope=samsung', search: '?launch=menu&cert_scope=samsung',
+                hash: '', replace: (to) => replaced.push(to) },
+            localStorage: storage ? {
+                getItem: (key) => (key in storage ? storage[key] : null),
+                setItem: (key, value) => { storage[key] = String(value); },
+                removeItem: (key) => { delete storage[key]; }
+            } : undefined
         }
     };
 
@@ -188,6 +195,29 @@ const checks = (script) => {
 
     const silent = run(script, [null], 90);
     check('only after a minute is it told what to do, in red', toneOf(silent.lines, 'still not answering after 60s') === 'bad');
+
+    // The page names the address the service had when it wrote it; a new one means reading it again.
+    const kept = {};
+    const reread = run(script, [null], 30, { storage: kept });
+    check('nothing answering for 15s, the page reads itself again, to pick up an address written since',
+        reread.replaced.length === 1 && reread.replaced[0] === 'file:///tube/boot.html?launch=menu&cert_scope=samsung'
+        && has(reread.lines, "reading this page again, in case the TV's address changed"), reread.replaced.join(' '));
+    check('and stops asking the old address while it does', /^1:\d+$/.test(kept['tube.reread'] || ''), JSON.stringify(kept));
+
+    const often = { 'tube.reread': `4:${Date.now()}` };
+    const given = run(script, [null], 90, { storage: often });
+    check('after four reads it waits as before, and gets to the advice after a minute',
+        given.replaced.length === 0 && toneOf(given.lines, 'still not answering after 60s') === 'bad', given.replaced.join(' '));
+
+    const old = { 'tube.reread': `4:${Date.now() - 11 * 60 * 1000}` };
+    check('a count from a start long ago starts again from nothing', run(script, [null], 30, { storage: old }).replaced.length === 1,
+        JSON.stringify(old));
+
+    const fine = { 'tube.reread': `2:${Date.now()}` };
+    run(script, [ready], 3, { storage: fine });
+    check('once the service answers, the count is cleared', !('tube.reread' in fine), JSON.stringify(fine));
+
+    check('the page is allowed to read itself again', /h5vcc-location-src [^;"]* file:/.test(html('')), 'no file: in the policy');
 
     check('it says which build wrote the page, and when', has(handed.lines, `tube: page written 0s ago by service pid ${process.pid}, patch `));
     check('a refused ask is named at once', has(slow.lines, `service: ${host(CONFIG.service)}: refused at once`),

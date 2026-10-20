@@ -63,4 +63,4 @@ const headersFor = (req, route) => {
         { 'accept-encoding': 'gzip, deflate' }));
 };
 
-module.exports = { routeFor, headersFor, YOUTUBE_ORIGIN };
+module.exports = { routeFor, headersFor, YOUTUBE_ORIGIN, GOOGLE };

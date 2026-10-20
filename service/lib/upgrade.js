@@ -7,6 +7,7 @@ const https = require('https');
 const URL = require('url');
 
 const postmortem = require('./postmortem.js');
+const clients = require('./clients.js');
 
 // An upgrade arrives in one of two shapes: absolute-form from a client using us as a proxy, or
 // origin-form over our own MITM TLS, where the Host header is the only thing naming the target.
@@ -56,6 +57,13 @@ const attach = (server, options) => {
     const rewrite = (options && options.rewrite) || (() => null);
 
     server.on('upgrade', (req, socket, head) => {
+        // An open upgrade is a tunnel to anywhere: only for the container on this set.
+        if (!clients.fromThisTv(req)) {
+            clients.refused('upgrade', clients.plain(req.socket && req.socket.remoteAddress), String(req.headers.host || ''));
+            socket.end('HTTP/1.1 403 Forbidden\r\nconnection: close\r\ncontent-length: 0\r\n\r\n');
+            return;
+        }
+
         hold(socket);
 
         const target = rewrite(req) || targetOf(req);

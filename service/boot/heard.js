@@ -9,11 +9,13 @@ import { probe } from './probe.js';
 import { handOver } from './handover.js';
 import { blocked } from './blocked.js';
 import { sayHelp } from './help.js';
+import { answered } from './reread.js';
 
 const answering = () => {
     if (held.seen) return;
 
     held.seen = true;
+    answered();
     say('service', `answering after ${(elapsed() / 1000).toFixed(1)}s`, 'ok');
 };
 

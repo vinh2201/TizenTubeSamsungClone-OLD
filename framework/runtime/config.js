@@ -23,11 +23,11 @@ const defaultConfig = {
   enableSponsorBlockOutro: true,
   enableSponsorBlockInteraction: true,
   enableSponsorBlockSelfPromo: true,
-  enableSponsorBlockPreview: true,
-  enableSponsorBlockMusicOfftopic: true,
+  enableSponsorBlockPreview: false,
+  enableSponsorBlockMusicOfftopic: false,
   enableSponsorBlockExclusiveAccess: false,
   enableSponsorBlockFiller: false,
-  enableSponsorBlockHighlight: true,
+  enableSponsorBlockHighlight: false,
   sponsorBlockManualSkips: ['intro', 'outro', 'filler'],
 
   enableDeArrow: false,
@@ -35,20 +35,20 @@ const defaultConfig = {
 
   enableReturnDislike: true,
 
-  preferredVideoQuality: 'highest',
-  videoPreferredCodec: 'any',
+  preferredVideoQuality: '1080p',
+  videoPreferredCodec: 'avc1',
   enableDevBridge: DEV_TOOLS,
   videoSpeed: 1,
   rememberPlaybackSpeed: false,
   speedSettingsIncrement: 0.25,
 
-  enableShorts: false,
+  enableShorts: true,
   disabledSidebarContents: HIDDEN_SIDEBAR_ITEMS,
 
   enableHqThumbnails: true,
 
   hideShoppingAction: true,
-  enableHideEndScreenCards: false,
+  enableHideEndScreenCards: true,
   enablePaidPromotionOverlay: true,
   enableUpNextCard: true,
   enableYouThereRenderer: true,
@@ -67,7 +67,7 @@ const defaultConfig = {
   enableAIAskButton: false,
 
   enableShowUserLanguage: true,
-  enableShowOtherLanguages: false,
+  enableShowOtherLanguages: true,
 
   // The browseId the app opens on, empty for YouTube's own choice.
   startupPage: '',

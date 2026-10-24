@@ -1,6 +1,5 @@
 'use strict';
 
-const os = require('os');
 
 const postmortem = require('./lib/postmortem.js');
 const lastRun = require('./lib/lastRun.js');
@@ -15,6 +14,7 @@ const { USER_SCRIPT, sized } = require('./lib/shipped.js');
 const proxy = require('./lib/proxy.js');
 const { STAMP } = require('./lib/stamp.js');
 const { capability } = require('./lib/platform.js');
+const { lanAddresses } = require('./lib/serviceAddress.js');
 const claimants = require('./lib/claimants.js');
 const bootRoutes = require('./lib/bootRoutes.js');
 const journalRoutes = require('./lib/journalRoutes.js');
@@ -95,9 +95,13 @@ dev.attach(app);
 proxy.attachFallback(app);
 routeErrors.attach(app);
 
-// Every interface: the container reaches us on this set's own address, never loopback.
+// Every interface: the 5.5 widget's container reaches us on this set's own address, the 5.0 widget's on 127.0.0.2.
 const BIND = '0.0.0.0';
-const RETRY_LISTEN_AFTER = 5000;
+
+// The address the 5.0 widget's --base_url names. Another app is far less likely to hold it than 127.0.0.1.
+const LOOPBACK = '127.0.0.2';
+
+const WATCH_EVERY = 5000;
 const REPEAT_AFTER = 60000;
 
 const repeated = { text: '', at: 0 };
@@ -112,17 +116,10 @@ const noteRarely = (what, text) => {
     postmortem.note(what, text);
 };
 
-// A LAN address still binds while another server holds the port on loopback.
-const candidates = () => {
-    const interfaces = os.networkInterfaces();
+// What is answering right now. Nothing here remembers an address for longer than the server on it lives.
+const held = { wildcard: false, servers: {}, trying: {}, lan: '' };
 
-    return Object.keys(interfaces).reduce((found, device) => found.concat(
-        interfaces[device].filter((a) => !a.internal && a.family === 'IPv4').map((a) => a.address)
-    ), [BIND]);
-};
-
-const listen = (addresses, index) => {
-    const address = addresses[index];
+const startServer = (address, done) => {
     const serving = { yes: false };
 
     const server = app.listen(ports.PROXY, address, () => {
@@ -131,6 +128,8 @@ const listen = (addresses, index) => {
         postmortem.note('listening', `${address}:${ports.PROXY}`);
         console.log(`tube service on ${address}:${ports.PROXY}`);
         if (!isTV) console.log('Running off-TV: proxy and userscript are live.');
+
+        done(null, server);
     });
 
     // An upgrade is not a request express ever sees, and an unanswered one hangs rather than fails.
@@ -148,18 +147,87 @@ const listen = (addresses, index) => {
         noteRarely('listen', `${address}:${ports.PROXY} — ${why}`);
         if (serving.yes) return undefined;
 
-        const next = index + 1;
-        if (next < addresses.length) return listen(addresses, next);
-
-        // Exiting would only be restarted into the same failure.
-        return setTimeout(() => listen(candidates(), 0), RETRY_LISTEN_AFTER);
+        return done(error);
     });
 };
+
+const unique = (address, index, all) => all.indexOf(address) === index;
+
+// When something else holds the port on one address, the wildcard is refused but the addresses that matter
+// are still free: 127.0.0.2 for the 5.0 widget, the LAN addresses for the 5.5 widget and for a phone. They
+// are served one by one, and followed when DHCP moves the set.
+const serveEach = () => {
+    const wanted = [LOOPBACK].concat(lanAddresses()).filter(unique);
+
+    wanted.forEach((address) => {
+        if (held.servers[address] || held.trying[address]) return;
+
+        held.trying[address] = true;
+
+        startServer(address, (error, server) => {
+            held.trying[address] = false;
+            if (!error) held.servers[address] = server;
+        });
+    });
+
+    Object.keys(held.servers).forEach((address) => {
+        if (address === LOOPBACK || wanted.indexOf(address) !== -1) return;
+
+        postmortem.note('listening', `${address}:${ports.PROXY} released: the set no longer has that address`);
+
+        try {
+            held.servers[address].close();
+        } catch (e) {
+            // Closing a server that is already gone changes nothing.
+        }
+
+        delete held.servers[address];
+    });
+};
+
+const open = () => startServer(BIND, (error, server) => {
+    if (!error) {
+        held.wildcard = true;
+        held.servers[BIND] = server;
+        return undefined;
+    }
+
+    return serveEach();
+});
+
+// The boot screen carries the address it was written for, so a lease that changes while the service keeps
+// running (no wake message comes with it) would send the next open to the old one.
+const watchNetwork = () => setInterval(() => {
+    const now = lanAddresses().join(',');
+
+    if (now !== held.lan) {
+        postmortem.note('network', `address of this set: ${now || 'none'} (was ${held.lan || 'none'})`);
+        held.lan = now;
+
+        // The boot screen follows the address too (cobalt.js polls it every 10 s); asking now saves the wait.
+        const follow = cobalt && (cobalt.readdress || cobalt.refreshBootScreen);
+
+        if (follow) {
+            try {
+                follow();
+            } catch (e) {
+                postmortem.note('cobalt', e);
+            }
+        }
+    }
+
+    // Retried for as long as nothing serves the wildcard: whatever held the port may have gone.
+    if (!held.wildcard) serveEach();
+}, WATCH_EVERY);
 
 const holdFor = dev.startDelay();
 if (holdFor) postmortem.note('listen', `held shut for ${holdFor / 1000}s by TUBE_START_DELAY`);
 
-setTimeout(() => listen(candidates(), 0), holdFor);
+setTimeout(() => {
+    held.lan = lanAddresses().join(',');
+    open();
+    watchNetwork();
+}, holdFor);
 
 // Tizen's service runner calls these on every wake message, and a missing one kills the service.
 module.exports = {

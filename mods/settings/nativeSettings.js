@@ -3,7 +3,7 @@ import { GROUPS } from './settingsModel.js';
 import { categoryFor } from './settingRows.js';
 import { ADDED, putMoved, takeMoved } from './adoptedRows.js';
 import { category, categoryOf, indexOfCategory } from './settingsResponse.js';
-import { claimDrawnRows } from './claimDrawn.js';
+import { claimDrawnRows, watchDrawnRows } from './claimDrawn.js';
 import { redrawSettingRows } from './settingComponents.js';
 
 // Our categories go in before YouTube's rows are taken out, so there is somewhere for them to land.
@@ -25,9 +25,11 @@ function PatchSettings(response) {
 
     const items = response.items;
     if (!items.some(categoryOf)) return;
-    if (alreadyPatched(items)) return;
 
+    // Every response asks for the claim, since an earlier one may have run out before the rows were drawn.
     claimDrawnRows();
+
+    if (alreadyPatched(items)) return;
 
     insertAt(items, indexOfCategory(items, BEFORE), GROUPS.map(categoryFor));
 
@@ -46,6 +48,9 @@ onResponse('settings', ['items'], PatchSettings);
 
 const start = () => {
     configChangeEmitter.addEventListener('configChange', () => redrawSettingRows());
+
+    // Also watched from the start, so rows drawn without any response of ours passing by are still claimed.
+    watchDrawnRows();
 };
 
 export { PatchSettings, start };

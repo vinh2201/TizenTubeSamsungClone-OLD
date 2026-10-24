@@ -45,7 +45,8 @@ const configFor = () => ({
 // Cobalt refuses whatever the policy omits, navigation included.
 const policyFor = (config) => `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; `
     + `connect-src ${[config.service].concat(config.alternates).join(' ')} ${YOUTUBE}; `
-    + `h5vcc-location-src ${YOUTUBE} ${config.service} file:`;
+    // The boot screen hands over to whichever address answered (see boot/elsewhere.js), so those are allowed too.
+    + `h5vcc-location-src ${[YOUTUBE, config.service].concat(config.alternates).join(' ')} file:`;
 
 const STYLE = `html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000000; }
 body { color: #aaaaaa; font-family: monospace; font-size: 19px; line-height: 29px; }

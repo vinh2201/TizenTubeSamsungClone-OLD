@@ -11,14 +11,17 @@ const start = () => {
   claimInterpreters();
   takeOverKeys();
 
+  // The settings switches (and every other command we answer) ride on YouTube's command resolver, so it is
+  // claimed as soon as it exists. It used to wait for the first <video>, which left the rows of our own
+  // settings drawn but dead until something had been played.
+  whenFound('command resolver', () => claimCommands() || null, () => undefined, { everyMs: 250, forMs: Infinity });
+
   // Runs once, although whenVideo fires again when the page swaps the element.
   whenVideo('ui shell', () => {
     if (once.started) return;
     once.started = true;
 
     addStyles();
-
-    whenFound('command resolver', () => claimCommands() || null, () => undefined, { everyMs: 250 });
 
     reloadGuide();
   });

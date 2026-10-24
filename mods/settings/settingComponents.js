@@ -1,14 +1,35 @@
-import { configRead, findByPrototype, findBySource, findComponent, sourceOf } from '../../framework/index.js';
+import { configRead, findByPrototype, findBySource, findComponent, sourceOf, warn } from '../../framework/index.js';
 
 const getterOf = (prototype, name) => {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
     return descriptor && typeof descriptor.get === 'function' ? descriptor.get : null;
 };
 
-const findBooleanRow = () => findByPrototype((prototype) =>
+const BOOLEAN_TAG = 'ytlr-setting-boolean-renderer';
+
+const hasBooleanShape = (prototype) => !!(
     getterOf(prototype, 'enabled')
     && getterOf(prototype, 'enabledLabel')
     && getterOf(prototype, 'disabledLabel'));
+
+// The row on screen says which class is the switch. The first class in the registry with the same getters can
+// be another component that merely shares them, and claiming that one leaves the real rows untouched.
+const drawnBooleanRow = () => {
+    try {
+        const drawn = findComponent(BOOLEAN_TAG);
+        return drawn && drawn.prototype && hasBooleanShape(drawn.prototype) ? drawn : null;
+    } catch (e) {
+        return null;
+    }
+};
+
+const findBooleanRow = () => {
+    const drawn = drawnBooleanRow();
+    if (drawn) return { component: drawn, how: 'the row on screen' };
+
+    const found = findByPrototype(hasBooleanShape);
+    return found ? { component: found, how: 'the registry' } : null;
+};
 
 const settingOf = (endpoint) => {
     const datas = endpoint
@@ -27,9 +48,10 @@ const state = { booleans: false, notes: false, redrawName: null };
 function claimBooleanRows() {
     if (state.booleans) return true;
 
-    const component = findBooleanRow();
-    if (!component) return false;
+    const found = findBooleanRow();
+    if (!found) return false;
 
+    const component = found.component;
     const original = getterOf(component.prototype, 'enabled');
     if (!original) return false;
 
@@ -44,6 +66,10 @@ function claimBooleanRows() {
     });
 
     state.booleans = true;
+    warn('settings', `switch rows claimed from ${found.how}`);
+
+    // Rows drawn before the claim still show YouTube's own value.
+    redrawSettingRows();
     return true;
 }
 

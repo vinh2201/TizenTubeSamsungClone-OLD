@@ -15,6 +15,7 @@ const proxy = require('./lib/proxy.js');
 const { STAMP } = require('./lib/stamp.js');
 const { capability } = require('./lib/platform.js');
 const { lanAddresses } = require('./lib/serviceAddress.js');
+const portMemory = require('./lib/portMemory.js');
 const claimants = require('./lib/claimants.js');
 const bootRoutes = require('./lib/bootRoutes.js');
 const journalRoutes = require('./lib/journalRoutes.js');
@@ -26,6 +27,12 @@ const knobs = require('./lib/knobs.js');
 
 // A cobalt.js that will not load must not stop the proxy starting.
 const cobalt = require('./lib/cobaltIfItLoads.js')();
+
+// A set that had to move to a spare port starts on it again (portMemory.js), before the boot screen names a port.
+if (cobalt && cobalt.usesBootScreen && cobalt.usesBootScreen()) {
+    const remembered = portMemory.recall();
+    if (remembered) ports.use(remembered);
+}
 
 const isTV = typeof tizen !== 'undefined';
 
@@ -117,16 +124,17 @@ const noteRarely = (what, text) => {
 };
 
 // What is answering right now. Nothing here remembers an address for longer than the server on it lives.
-const held = { wildcard: false, servers: {}, trying: {}, lan: '' };
+const held = { wildcard: false, servers: {}, trying: {}, lan: '', refused: 0, told: null };
 
 const startServer = (address, done) => {
     const serving = { yes: false };
+    const port = ports.current();
 
-    const server = app.listen(ports.PROXY, address, () => {
+    const server = app.listen(port, address, () => {
         serving.yes = true;
 
-        postmortem.note('listening', `${address}:${ports.PROXY}`);
-        console.log(`tube service on ${address}:${ports.PROXY}`);
+        postmortem.note('listening', `${address}:${port}`);
+        console.log(`tube service on ${address}:${port}`);
         if (!isTV) console.log('Running off-TV: proxy and userscript are live.');
 
         done(null, server);
@@ -144,7 +152,7 @@ const startServer = (address, done) => {
                 + 'one, is the usual cause; only one of the two can serve the container'
             : postmortem.describe(error);
 
-        noteRarely('listen', `${address}:${ports.PROXY} — ${why}`);
+        noteRarely('listen', `${address}:${port} — ${why}`);
         if (serving.yes) return undefined;
 
         return done(error);
@@ -166,14 +174,17 @@ const serveEach = () => {
 
         startServer(address, (error, server) => {
             held.trying[address] = false;
-            if (!error) held.servers[address] = server;
+            if (error) return;
+
+            held.servers[address] = server;
+            announce();
         });
     });
 
     Object.keys(held.servers).forEach((address) => {
         if (address === LOOPBACK || wanted.indexOf(address) !== -1) return;
 
-        postmortem.note('listening', `${address}:${ports.PROXY} released: the set no longer has that address`);
+        postmortem.note('listening', `${address}:${ports.current()} released: the set no longer has that address`);
 
         try {
             held.servers[address].close();
@@ -185,11 +196,61 @@ const serveEach = () => {
     });
 };
 
+// The boot screen names the address and the port it was written for. A service that now answers elsewhere than
+// the page on disk says so, and what is answering is remembered for the next start.
+const followCobalt = () => {
+    const follow = cobalt && (cobalt.readdress || cobalt.refreshBootScreen);
+    if (!follow) return;
+
+    try {
+        follow();
+    } catch (e) {
+        postmortem.note('cobalt', e);
+    }
+};
+
+const answering = () => Object.keys(held.servers).length > 0;
+
+const announce = () => {
+    const port = ports.current();
+    if (held.told === port) return;
+
+    held.told = port;
+    portMemory.remember(port);
+
+    if (port !== ports.PROXY) postmortem.note('listening', `answering on port ${port}, not ${ports.PROXY}: the boot screen is told`);
+    followCobalt();
+};
+
+// Only the 5.5 widget finds the service through a page the service writes; the 5.0 widget's address is in config.xml.
+const canMovePort = () => !!(cobalt && cobalt.usesBootScreen && cobalt.usesBootScreen());
+
+const MOVE_AFTER = 3;
+
+// The port stayed refused while nothing answered anywhere: another app holds it. Taking the next one costs the
+// viewer nothing but a new sign-in, which is far less than a reinstall.
+const movePort = () => {
+    const order = [ports.PROXY].concat(ports.SPARE);
+    const from = ports.current();
+    const to = order[(order.indexOf(from) + 1) % order.length];
+
+    postmortem.note('listening', `port ${from} stayed refused for ${(MOVE_AFTER * WATCH_EVERY) / 1000}s; trying ${to}`);
+
+    ports.use(to);
+    held.refused = 0;
+    held.wildcard = false;
+    held.trying = {};
+    held.servers = {};
+
+    // eslint-disable-next-line no-use-before-define
+    open();
+};
+
 const open = () => startServer(BIND, (error, server) => {
     if (!error) {
         held.wildcard = true;
         held.servers[BIND] = server;
-        return undefined;
+        return announce();
     }
 
     return serveEach();
@@ -205,19 +266,19 @@ const watchNetwork = () => setInterval(() => {
         held.lan = now;
 
         // The boot screen follows the address too (cobalt.js polls it every 10 s); asking now saves the wait.
-        const follow = cobalt && (cobalt.readdress || cobalt.refreshBootScreen);
-
-        if (follow) {
-            try {
-                follow();
-            } catch (e) {
-                postmortem.note('cobalt', e);
-            }
-        }
+        followCobalt();
     }
 
     // Retried for as long as nothing serves the wildcard: whatever held the port may have gone.
     if (!held.wildcard) serveEach();
+
+    if (answering()) {
+        held.refused = 0;
+        return;
+    }
+
+    held.refused += 1;
+    if (held.refused >= MOVE_AFTER && canMovePort()) movePort();
 }, WATCH_EVERY);
 
 const holdFor = dev.startDelay();

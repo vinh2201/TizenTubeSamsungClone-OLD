@@ -28,6 +28,22 @@ const isRepeatable = (req) => !!req && BODIED.indexOf(req.method) === -1;
 const isRetriable = (error) => !!error
     && (RETRIABLE.indexOf(error.code) !== -1 || /socket hang up|premature close/i.test(error.message || ''));
 
+// What node-fetch calls "The user aborted a request" when it was our own deadline that fired.
+const NO_ANSWER = 'TUBE_NO_ANSWER';
+
+const timedOut = (error) => (error && (error.name === 'AbortError' || /user aborted/i.test(error.message || ''))
+    ? Object.assign(new Error(`no answer within ${HEADERS_DEADLINE / 1000}s`), { code: NO_ANSWER })
+    : error);
+
+// A request that got no answer on a connection that had been idle is as likely to have met a dead one as a slow server.
+const worthAsking = (error) => isRetriable(error) || (!!error && error.code === NO_ANSWER);
+
+// The address (without its query) of requests whose answer came with headers too big for node's parser. They are asked
+// over http2 from the start, instead of failing once on every launch first.
+const needsHttp2 = {};
+const MOST_REMEMBERED = 50;
+const pathOf = (url) => String(url).split('?')[0];
+
 // Node 12 has no AbortController, and node-fetch accepts any signal whose constructor is named
 // AbortSignal.
 const SIGNAL = { constructor: { name: 'AbortSignal' } };
@@ -66,22 +82,39 @@ const send = (url, req, headers, fresh) => {
 
     const attempt = (changed) => (body && !SIGNAL_BESIDE_STREAM
         ? fetch(url, Object.assign({}, options, changed))
-        : untilHeaders((signal) => fetch(url, Object.assign({}, options, changed, { signal }))));
+        : untilHeaders((signal) => fetch(url, Object.assign({}, options, changed, { signal }))))
+        .catch((error) => { throw timedOut(error); });
 
-    return attempt().catch((error) => {
-        if (bigheaders.isHeaderOverflow(error) && !body && url.indexOf('https:') === 0) {
+    const overHttp2 = () => bigheaders.fetchOverHttp2(url, { method: req.method, headers });
+    const canUseHttp2 = !body && url.indexOf('https:') === 0;
+
+    const normally = () => attempt().catch((error) => {
+        if (bigheaders.isHeaderOverflow(error) && canUseHttp2) {
             postmortem.note('upstream', `header overflow on ${url.slice(0, 80)} — retrying over http2`);
-            return bigheaders.fetchOverHttp2(url, { method: req.method, headers });
+
+            if (Object.keys(needsHttp2).length < MOST_REMEMBERED) needsHttp2[pathOf(url)] = true;
+            return overHttp2();
         }
 
         // A streamed body cannot be sent twice.
-        if (!isRetriable(error) || body) throw error;
+        if (!worthAsking(error) || body) throw error;
 
-        postmortem.note('upstream', `${postmortem.describe(error)} on ${url.slice(0, 80)}`
-            + ' — retrying on a fresh connection');
+        // The deadline's own error says all there is to say in one line; a stack would only fill the log.
+        const why = error.code === NO_ANSWER ? error.message : postmortem.describe(error);
+
+        postmortem.note('upstream', `${why} on ${url.slice(0, 80)} — retrying on a fresh connection`);
 
         return attempt({ agent: undefined });
     });
+
+    if (canUseHttp2 && needsHttp2[pathOf(url)]) {
+        return overHttp2().catch(() => {
+            delete needsHttp2[pathOf(url)];
+            return normally();
+        });
+    }
+
+    return normally();
 };
 
 const textOf = (response) => response.text().then((text) => ({ response, text }));

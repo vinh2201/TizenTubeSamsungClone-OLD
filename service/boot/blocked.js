@@ -3,9 +3,10 @@ import { held } from './state.js';
 import { say } from './screen.js';
 import { flush } from './outbox.js';
 import { sayHelp } from './help.js';
+import { hintRetry } from './retry.js';
 
-const GIVE_UP = 'youtube still does not answer through the service: close the app and open it again; '
-    + 'reinstall it if this keeps happening';
+const GIVE_UP = 'youtube still does not answer through the service: press OK to try again, '
+    + 'or close the app and open it again';
 
 // A new certificate is trusted only after a restart, so the service is asked for one, once.
 const askForRestart = () => {
@@ -22,7 +23,10 @@ export const blocked = (again) => {
     // The service answers but YouTube does not come back through it, so it is asked to check itself.
     held.stuck = true;
 
-    if (held.probed === 1) say('tube', 'youtube does not answer through the service yet', 'warn');
+    if (held.probed === 1) {
+        say('tube', 'youtube does not answer through the service yet', 'warn');
+        hintRetry();
+    }
     if (held.probed === TIMING.restartAfter) askForRestart();
 
     if (held.probed === TIMING.probeGiveUp) {

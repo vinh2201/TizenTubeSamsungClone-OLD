@@ -34,7 +34,7 @@ const item = (found) => `<li class="${found.ok ? 'ok' : 'bad'}">`
     + `<b>${escaped(found.name)}</b> — <code>${escaped(found.detail)}</code></li>`;
 
 // The address the phone already reached us on, so the log link works from the same network.
-const at = (host) => `http://${(host || 'localhost').replace(/:\d+$/, '')}:${ports.PROXY}`;
+const at = (host) => `http://${(host || 'localhost').replace(/:\d+$/, '')}:${ports.current()}`;
 
 // The LAN address is the thing a viewer is asked for and cannot find.
 const onTheNetwork = () => {

@@ -1,12 +1,32 @@
 'use strict';
 
-const { appendFileSync, readFileSync, statSync, renameSync, mkdirSync } = require('fs');
-const { dirname } = require('path');
+const { appendFileSync, readFileSync, writeFileSync, statSync, renameSync, mkdirSync, unlinkSync } = require('fs');
+const { dirname, join } = require('path');
+
+const { scrub } = require('./scrub.js');
 
 const LOG = process.env.TUBE_LOG || '/home/owner/share/tube/service.log';
 const MAX_BYTES = 64 * 1024;
 
-const state = { ready: false };
+// 'file' keeps the log where a restart does not erase it. 'memory' keeps it only in this run, for the boot screen and
+// for /diag, and writes nothing. The choice is kept next to the log.
+const MODE_FILE = join(dirname(LOG), 'logmode');
+const MODES = ['file', 'memory'];
+
+const state = { ready: false, mode: null };
+
+const mode = () => {
+    if (state.mode) return state.mode;
+
+    try {
+        const kept = String(readFileSync(MODE_FILE, 'utf8')).trim();
+        state.mode = MODES.indexOf(kept) === -1 ? 'file' : kept;
+    } catch (e) {
+        state.mode = 'file';
+    }
+
+    return state.mode;
+};
 
 // appendFileSync fails when the directory is missing, and note() swallows that failure.
 const ensure = () => {
@@ -38,8 +58,10 @@ const remember = (what, text) => {
 };
 
 const note = (what, detail) => {
-    const text = describe(detail);
+    const text = scrub(describe(detail));
     remember(what, text);
+
+    if (mode() === 'memory') return;
 
     try {
         ensure();
@@ -63,7 +85,30 @@ const readOr = (file) => {
 };
 
 // The rotated file first, so the journal reads from the start.
-const read = () => readOr(`${LOG}.1`) + readOr(LOG);
+const read = () => (mode() === 'memory'
+    ? kept.lines.map((line) => `${new Date(line.at).toISOString()}  ${line.what}: ${line.text}`).join('\n')
+    : readOr(`${LOG}.1`) + readOr(LOG));
+
+// Everything written so far goes; what is kept in memory is only for this run.
+const forget = () => {
+    [LOG, `${LOG}.1`].forEach((file) => {
+        try { unlinkSync(file); } catch (e) { /* not there */ }
+    });
+};
+
+const setMode = (next) => {
+    if (MODES.indexOf(next) === -1) return false;
+
+    try {
+        ensure();
+        writeFileSync(MODE_FILE, next);
+    } catch (e) { /* the choice then only holds until the next start */ }
+
+    state.mode = next;
+    if (next === 'memory') forget();
+
+    return true;
+};
 
 const watch = () => {
     process.on('uncaughtException', (error) => {
@@ -77,4 +122,4 @@ const watch = () => {
     note('started', `pid ${process.pid}, node ${process.version}`);
 };
 
-module.exports = { describe, note, read, remember, since, watch };
+module.exports = { describe, note, read, remember, since, watch, mode, setMode, forget };

@@ -2,9 +2,10 @@
 
 const postmortem = require('./postmortem.js');
 const { CONTAINER, appId, configuredContent, container } = require('./cobaltConfig.js');
-const { STOCK, discover, locate, stageOrFail } = require('./cobaltContent.js');
+const { STOCK, discover, locate, stageInSlices } = require('./cobaltContent.js');
 const { writeBootScreen } = require('./bootScreen.js');
 const { serviceAddress } = require('./serviceAddress.js');
+const ports = require('./ports.js');
 const evergreen = require('./evergreen.js');
 const { guarded, restart } = require('./cobaltLaunch.js');
 
@@ -19,14 +20,20 @@ const note = (what, detail) => postmortem.note('cobalt', `${what}: ${postmortem.
 const state = { prepared: null, preparing: false, settled: false, failed: null, waiting: [] };
 const proxied = { context: null, at: 0, lookedAt: 0 };
 
-// The address the boot screen on disk was last written for.
-const screen = { address: null, watching: null };
+// The address and port the boot screen on disk was last written for.
+const screen = { address: null, port: null, watching: null };
 
 const writeScreen = (content) => guarded(() => {
     const address = serviceAddress();
+    const port = ports.current();
+
     writeBootScreen(content);
     screen.address = address;
+    screen.port = port;
 }, (error) => note('boot screen', error));
+
+// Only the 5.5 widget has a boot screen, and only it can follow the service to another port.
+const usesBootScreen = () => !!configuredContent();
 
 // Started at boot before the network was up, the screen names loopback, which the container cannot
 // reach; a new lease names an address that is gone. Either way the page would wait for ever.
@@ -35,9 +42,12 @@ const readdress = () => {
     if (!content) return;
 
     const now = serviceAddress();
-    if (now === screen.address) return;
+    const port = ports.current();
+    if (now === screen.address && port === screen.port) return;
 
-    note('address', `${screen.address} → ${now}: the boot screen is written for the new address`);
+    if (now !== screen.address) note('address', `${screen.address} → ${now}: the boot screen is written for the new address`);
+    if (port !== screen.port) note('address', `port ${screen.port} → ${port}: the boot screen is written for the new port`);
+
     writeScreen(content);
 };
 
@@ -233,23 +243,28 @@ const prepare = (done) => {
 
     if (!from) return finish(null, null);
 
-    const staged = stageOrFail(content, from);
-    if (staged.error) return finish(staged.error);
+    // A slice at a time, so that the port is open (and says the service is starting) while this runs.
+    stageInSlices(content, from, (staged) => {
+        if (staged.error) return finish(staged.error);
 
-    writeScreen(content);
-    watchAddress();
-    guarded(() => evergreen.bootstrap(content, from), (error) => note('evergreen', error));
+        writeScreen(content);
+        watchAddress();
+        guarded(() => evergreen.bootstrap(content, from), (error) => note('evergreen', error));
 
-    return finish(null, { content });
+        return finish(null, { content });
+    });
+
+    return undefined;
 };
 
 const status = () => ({
     prepared: !!state.prepared,
+    preparing: state.preparing,
     failed: state.failed
 });
 
 module.exports = {
     prepare, wake, served, status, restart, relaunch, container, appId, contact,
-    readdress, refreshBootScreen,
+    readdress, refreshBootScreen, usesBootScreen,
     heardOffer: evergreen.heardOffer
 };

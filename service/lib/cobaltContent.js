@@ -93,4 +93,65 @@ const stageOrFail = (content, from = STOCK) => {
     }
 };
 
-module.exports = { STOCK, cobaltIsInstalledHere, discover, findContent, locate, stageOrFail };
+// How many entries are looked at before the event loop gets a turn.
+const SLICE = 200;
+
+// The walk of linkInto, a slice at a time. It runs on every start and looks at every file of the stock content, which
+// on a TV's storage can take long enough that the service answered nothing meanwhile (the boot screen then said it
+// was not running). This way the port is open, and says it is starting, while the content is being staged.
+const stageInSlices = (content, from, done) => {
+    const directories = [{ from, to: content }];
+    const walk = { current: null, linked: 0 };
+
+    const open = (directory) => {
+        if (isLink(directory.to)) fs.unlinkSync(directory.to);
+        fs.mkdirSync(directory.to, { recursive: true });
+
+        walk.current = { from: directory.from, to: directory.to, names: fs.readdirSync(directory.from), at: 0 };
+    };
+
+    const step = () => {
+        try {
+            for (let looked = 0; looked < SLICE;) {
+                if (!walk.current) {
+                    if (!directories.length) {
+                        if (walk.linked) note('staged', `${walk.linked} files linked into ${content}`);
+                        return done({});
+                    }
+
+                    open(directories.pop());
+                }
+
+                const directory = walk.current;
+
+                if (directory.at >= directory.names.length) {
+                    walk.current = null;
+                } else {
+                    const name = directory.names[directory.at];
+                    directory.at += 1;
+                    looked += 1;
+
+                    const source = path.join(directory.from, name);
+                    const target = path.join(directory.to, name);
+
+                    if (fs.statSync(source).isDirectory()) {
+                        directories.push({ from: source, to: target });
+                    } else if (!isLink(target)) {
+                        const staged = `${target}.${process.pid}`;
+                        fs.symlinkSync(source, staged);
+                        fs.renameSync(staged, target);
+                        walk.linked += 1;
+                    }
+                }
+            }
+        } catch (error) {
+            return done({ error });
+        }
+
+        return setImmediate(step);
+    };
+
+    return setImmediate(step);
+};
+
+module.exports = { STOCK, cobaltIsInstalledHere, discover, findContent, locate, stageOrFail, stageInSlices };

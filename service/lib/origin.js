@@ -10,7 +10,7 @@ const servedHost = () => (/--base_url=http:\/\/([^/:\s"]+)/.exec(switches() || '
 // Asked each time: DHCP can change this set's address while the service runs.
 const proxyHost = () => process.env.TUBE_PROXY_HOST || servedHost() || serviceAddress();
 
-const localOrigin = () => `http://${proxyHost()}:${ports.PROXY}`;
+const localOrigin = () => `http://${proxyHost()}:${ports.current()}`;
 
 // What a redirect out of the bypass has to be prefixed with to come back through here.
 const proxyPrefix = () => `${localOrigin()}/cors-bypass/`;

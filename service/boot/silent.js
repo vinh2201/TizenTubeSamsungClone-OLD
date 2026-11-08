@@ -7,11 +7,12 @@ import { failureOf } from './failure.js';
 import { lookElsewhere } from './elsewhere.js';
 import { sayHelp } from './help.js';
 import { rereadIfStuck } from './reread.js';
+import { hintRetry } from './retry.js';
 
 const HOST = service.replace('http://', '');
 
-const GIVE_UP = `still not answering after ${TIMING.giveUp / 1000}s: if this screen stays, `
-    + 'turn the TV off and on again; reinstall the app if it keeps happening';
+const GIVE_UP = `still not answering after ${TIMING.giveUp / 1000}s: press OK to try again; if this screen stays, `
+    + 'turn the TV off and on again';
 
 // Named even though the service is failing: a phone asks for the page over the network, not through
 // the path the container just failed on.
@@ -20,6 +21,7 @@ const advise = () => {
     held.advised = true;
 
     say('tube', `open ${diag} on a phone to see what, and what to do`, 'note');
+    hintRetry();
 };
 
 const tell = (failure) => {
